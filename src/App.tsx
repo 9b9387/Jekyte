@@ -1,6 +1,4 @@
-import { Button } from '@mui/joy';
-import { GitHub as GitHubIcon } from '@mui/icons-material';
-
+import { GithubSignInButton } from './components/GithubSignInButton';
 
 function App() {
   return (
@@ -13,22 +11,13 @@ function App() {
       margin: 0,
       padding: 0,
     }}>
-      <Button
-        variant="soft"
-        color="neutral"
-        startDecorator={<GitHubIcon />}
-        size="lg"
-        sx={{
-          borderRadius: 'md',
-          padding: '10px 20px',
-          fontSize: '16px',
-          '--Button-gap': '12px',
-        }}
-      >
-        Sign in with GitHub
-      </Button>
+      <GithubSignInButton 
+        onSignIn={async () => {
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        }} 
+      />
     </div>
-  )
+  );
 }
 
-export default App
+export default App;
