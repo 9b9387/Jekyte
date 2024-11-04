@@ -1,7 +1,8 @@
 import dotenv from 'dotenv';
 import path from 'path';
 import { BrowserWindow, shell } from 'electron';
-import axios from 'axios';
+import axios, { AxiosInstance } from 'axios';
+import { TokenManager } from './token-manager';
 
 // 加载环境变量
 dotenv.config({
@@ -9,112 +10,203 @@ dotenv.config({
 });
 
 export class GitHubService {
+  
   private static readonly CLIENT_ID = process.env.GITHUB_CLIENT_ID;
   private static readonly CLIENT_SECRET = process.env.GITHUB_CLIENT_SECRET;
   private static readonly REDIRECT_URI = 'jekyte://github-oauth/callback';
   private static readonly SCOPE = 'repo user';
 
   private state: string = '';
+  private accessToken: string | null = null;
 
-  private readonly githubApi = axios.create({
-    baseURL: 'https://github.com',
-    headers: {
-      'Accept': 'application/json',
-      'Content-Type': 'application/json',
-    },
-    timeout: 10000, // 10秒超时
-  });
+  // GitHub API 客户端
+  private readonly githubApi: AxiosInstance;
+  private readonly authApi: AxiosInstance;
 
-  constructor() {
-    // 验证必要的环境变量是否存在
+  public constructor() {
+    this.validateConfig();
+    this.githubApi = this.createGithubApiClient();
+    this.authApi = this.createAuthApiClient();
+    this.setupInterceptors();
+    this.initialize();
+  }
+
+  // 异步工厂方法
+  // public static async getInstance(): Promise<GitHubService> {
+  //   if (!this.instance) {
+  //     this.instance = new GitHubService();
+  //     await this.instance.initialize();
+  //   }
+  //   return this.instance;
+  // }
+
+  private validateConfig() {
     if (!GitHubService.CLIENT_ID || !GitHubService.CLIENT_SECRET) {
       throw new Error('GitHub OAuth credentials not configured. Please check your .env file.');
     }
-    
-    // 添加响应拦截器统一处理错误
+  }
+
+  private createGithubApiClient(): AxiosInstance {
+    return axios.create({
+      baseURL: 'https://api.github.com',
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+      },
+      timeout: 10000
+    });
+  }
+
+  private createAuthApiClient(): AxiosInstance {
+    return axios.create({
+      baseURL: 'https://github.com',
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+      },
+      timeout: 10000
+    });
+  }
+
+  private async initialize(): Promise<void> {
+    try {
+      this.accessToken = await TokenManager.getToken();
+      console.log("initialize accessToken: " + this.accessToken);
+      if (this.accessToken) {
+        const isValid = await this.validateToken();
+        if (!isValid) {
+          await this.logout();
+        } else {
+          this.validateAndRefreshToken();
+        }
+      }
+    } catch (error) {
+      console.error('Failed to initialize GitHub service:', error);
+      throw error;
+    }
+  }
+
+  private setupInterceptors(): void {
+    // API 请求拦截器
+    this.githubApi.interceptors.request.use(
+      config => {
+        if (this.accessToken) {
+          config.headers.Authorization = `Bearer ${this.accessToken}`;
+        }
+        return config;
+      }
+    );
+
+    // API 响应拦截器
     this.githubApi.interceptors.response.use(
       response => response,
-      error => {
-        console.error('GitHub API Error:', {
-          status: error.response?.status,
-          data: error.response?.data,
-          message: error.message
-        });
+      async error => {
+        if (error.response?.status === 401) {
+          const refreshed = await this.validateAndRefreshToken();
+          if (refreshed && error.config) {
+            // 重试失败的请求
+            return this.githubApi.request(error.config);
+          }
+        }
         return Promise.reject(error);
       }
     );
   }
 
-  public async initiateOAuth() {
-    this.state = this.generateState();
+  public async initiateOAuth(): Promise<void> {
+    this.state = crypto.randomUUID();
     const authUrl = new URL('https://github.com/login/oauth/authorize');
-    authUrl.searchParams.append('client_id', GitHubService.CLIENT_ID);
+    authUrl.searchParams.append('client_id', GitHubService.CLIENT_ID!);
     authUrl.searchParams.append('redirect_uri', GitHubService.REDIRECT_URI);
     authUrl.searchParams.append('scope', GitHubService.SCOPE);
     authUrl.searchParams.append('state', this.state);
     
-    // 使用系统默认浏览器打开认证页面
     await shell.openExternal(authUrl.toString());
   }
 
-  private generateState(): string {
-    return crypto.randomUUID();
-  }
-
   public async handleOAuthCallback(code: string, state: string): Promise<void> {
-    console.log("handleOAuthCallback: ", code, state);
     if (state !== this.state) {
-      console.error("State mismatch:", state, this.state);
-      return;
+      throw new Error('Invalid state parameter');
     }
+
     try {
-      const { data } = await this.githubApi.post('/login/oauth/access_token', {
+      const { data } = await this.authApi.post('/login/oauth/access_token', {
         client_id: GitHubService.CLIENT_ID,
         client_secret: GitHubService.CLIENT_SECRET,
         code: code,
         redirect_uri: GitHubService.REDIRECT_URI
       });
 
-      console.log("OAuth response:", data);
-
       if (data.access_token) {
-        console.log("Access token received successfully");
-        // 存储访问令牌并发送成功消息到渲染进程
-        // TODO: 实现安全的令牌存储
-        BrowserWindow.getAllWindows()[0]?.webContents.send(
-          'oauth-success', 
-          data.access_token
-        );
+        console.log("access_token: " + data.access_token);
+        await this.setAccessToken(data.access_token);
+        BrowserWindow.getAllWindows()[0]?.webContents.send('oauth-success');
       } else {
-        console.error("No access token in response:", data);
-        BrowserWindow.getAllWindows()[0]?.webContents.send(
-          'oauth-error', 
-          data.error_description || 'Failed to get access token'
-        );
+        throw new Error(data.error_description || 'Failed to get access token');
       }
     } catch (error) {
-      if (axios.isAxiosError(error)) {
-        const errorMessage = error.response?.data?.error_description 
-          || error.message 
-          || 'Failed to complete OAuth process';
-        
-        console.error("Axios error during OAuth:", {
-          message: errorMessage,
-          response: error.response?.data,
-          status: error.response?.status
-        });
-        
-        BrowserWindow.getAllWindows()[0]?.webContents.send(
-          'oauth-error', 
-          errorMessage
-        );
-      } else {
-        console.error("Unexpected error during OAuth:", error);
-        BrowserWindow.getAllWindows()[0]?.webContents.send(
-          'oauth-error', 
-          'An unexpected error occurred'
-        );
-      }
+      this.handleError('OAuth error', error);
+      throw error;
     }
+  }
+
+  private async setAccessToken(token: string): Promise<void> {
+    await TokenManager.saveToken(token);
+    this.accessToken = token;
+  }
+
+  private async validateToken(): Promise<boolean> {
+    if (!this.accessToken) return false;
+    
+    try {
+      const response = await this.githubApi.get('/user');
+      console.log('User data:', response.data);
+      return response.status === 200;
+    } catch {
+      return false;
+    }
+  }
+
+  private async validateAndRefreshToken(): Promise<boolean> {
+    try {
+      const isValid = await this.validateToken();
+      if (!isValid) {
+        await this.logout();
+        BrowserWindow.getAllWindows()[0]?.webContents.send('token-expired');
+        return false;
+      }
+      return true;
+    } catch (error) {
+      this.handleError('Token refresh error', error);
+      return false;
+    }
+  }
+
+  public async logout(): Promise<void> {
+    await TokenManager.deleteToken();
+    this.accessToken = null;
+    BrowserWindow.getAllWindows()[0]?.webContents.send('logout');
+  }
+
+  public isAuthenticated(): boolean {
+    return !!this.accessToken;
+  }
+
+  private handleError(context: string, error: any): void {
+    if (axios.isAxiosError(error)) {
+      console.error(`${context}:`, {
+        message: error.response?.data?.error_description || error.message,
+        status: error.response?.status,
+        data: error.response?.data
+      });
+    } else {
+      console.error(`${context}:`, error);
+    }
+  }
+
+  // 公共 API 方法
+  public async getCurrentUser() {
+    const response = await this.githubApi.get('/user');
+    return response.data;
   }
 } 
