@@ -76,8 +76,6 @@ export class GitHubService {
         const isValid = await this.validateToken();
         if (!isValid) {
           await this.logout();
-        } else {
-          this.validateAndRefreshToken();
         }
       }
     } catch (error) {
@@ -102,7 +100,7 @@ export class GitHubService {
       response => response,
       async error => {
         if (error.response?.status === 401) {
-          const refreshed = await this.validateAndRefreshToken();
+          const refreshed = await this.validateToken();
           if (refreshed && error.config) {
             // 重试失败的请求
             return this.githubApi.request(error.config);
@@ -163,21 +161,6 @@ export class GitHubService {
       console.log('User data:', response.data);
       return response.status === 200;
     } catch {
-      return false;
-    }
-  }
-
-  private async validateAndRefreshToken(): Promise<boolean> {
-    try {
-      const isValid = await this.validateToken();
-      if (!isValid) {
-        await this.logout();
-        BrowserWindow.getAllWindows()[0]?.webContents.send('token-expired');
-        return false;
-      }
-      return true;
-    } catch (error) {
-      this.handleError('Token refresh error', error);
       return false;
     }
   }

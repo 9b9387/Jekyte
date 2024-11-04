@@ -26641,8 +26641,6 @@ const _GitHubService = class _GitHubService {
         const isValid = await this.validateToken();
         if (!isValid) {
           await this.logout();
-        } else {
-          this.validateAndRefreshToken();
         }
       }
     } catch (error2) {
@@ -26664,7 +26662,7 @@ const _GitHubService = class _GitHubService {
       async (error2) => {
         var _a;
         if (((_a = error2.response) == null ? void 0 : _a.status) === 401) {
-          const refreshed = await this.validateAndRefreshToken();
+          const refreshed = await this.validateToken();
           if (refreshed && error2.config) {
             return this.githubApi.request(error2.config);
           }
@@ -26717,21 +26715,6 @@ const _GitHubService = class _GitHubService {
       console.log("User data:", response.data);
       return response.status === 200;
     } catch {
-      return false;
-    }
-  }
-  async validateAndRefreshToken() {
-    var _a;
-    try {
-      const isValid = await this.validateToken();
-      if (!isValid) {
-        await this.logout();
-        (_a = BrowserWindow.getAllWindows()[0]) == null ? void 0 : _a.webContents.send("token-expired");
-        return false;
-      }
-      return true;
-    } catch (error2) {
-      this.handleError("Token refresh error", error2);
       return false;
     }
   }
