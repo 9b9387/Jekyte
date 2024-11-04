@@ -1,7 +1,8 @@
-import { app, BrowserWindow } from 'electron'
+import { app, BrowserWindow, ipcMain, protocol } from 'electron'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
+import { GitHubService } from './github-service'
 
 const require = createRequire(import.meta.url)
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -25,6 +26,19 @@ export const RENDERER_DIST = path.join(process.env.APP_ROOT, 'dist')
 process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL ? path.join(process.env.APP_ROOT, 'public') : RENDERER_DIST
 
 let win: BrowserWindow | null
+let githubService: GitHubService | null = null;
+
+
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: 'jekyte',
+    privileges: {
+      secure: true,
+      standard: true,
+      supportFetchAPI: true,
+    }
+  }
+]);
 
 function createWindow() {
   win = new BrowserWindow({
@@ -45,6 +59,12 @@ function createWindow() {
     // win.loadFile('dist/index.html')
     win.loadFile(path.join(RENDERER_DIST, 'index.html'))
   }
+
+  githubService = new GitHubService();
+
+  ipcMain.handle('github-oauth', async () => {
+    await githubService!.initiateOAuth();
+  });
 
   win.webContents.openDevTools()
 }
@@ -67,4 +87,23 @@ app.on('activate', () => {
   }
 })
 
-app.whenReady().then(createWindow)
+app.on('open-url', async (event, url) => {
+  console.log("open-url: " + url);
+  event.preventDefault();
+  if (url.startsWith('jekyte://github-oauth/callback')) {
+    const code = new URL(url).searchParams.get('code');
+    const state = new URL(url).searchParams.get('state');
+    console.log("code: " + code);
+    if (code && state) {
+      await githubService!.handleOAuthCallback(code, state);
+    }
+  }
+});
+
+// if (process.platform === 'darwin') {
+//   app.setAsDefaultProtocolClient('jekyte');
+// }
+
+app.whenReady().then(async () => {
+  createWindow();
+})
