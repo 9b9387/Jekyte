@@ -1,9 +1,16 @@
+import dotenv from 'dotenv';
+import path from 'path';
 import { BrowserWindow, shell } from 'electron';
 import axios from 'axios';
 
+// 加载环境变量
+dotenv.config({
+  path: path.resolve(process.cwd(), '.env')
+});
+
 export class GitHubService {
-  private static readonly CLIENT_ID = 'Ov23liUuxYoZdUw7O2I2';
-  private static readonly CLIENT_SECRET = '04a26c2a8e8ebb5ee46cd52529d3c0530ed210c9';
+  private static readonly CLIENT_ID = process.env.GITHUB_CLIENT_ID;
+  private static readonly CLIENT_SECRET = process.env.GITHUB_CLIENT_SECRET;
   private static readonly REDIRECT_URI = 'jekyte://github-oauth/callback';
   private static readonly SCOPE = 'repo user';
 
@@ -19,6 +26,11 @@ export class GitHubService {
   });
 
   constructor() {
+    // 验证必要的环境变量是否存在
+    if (!GitHubService.CLIENT_ID || !GitHubService.CLIENT_SECRET) {
+      throw new Error('GitHub OAuth credentials not configured. Please check your .env file.');
+    }
+    
     // 添加响应拦截器统一处理错误
     this.githubApi.interceptors.response.use(
       response => response,
