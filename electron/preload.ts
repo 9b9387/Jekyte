@@ -25,4 +25,9 @@ contextBridge.exposeInMainWorld('ipcRenderer', {
 
 contextBridge.exposeInMainWorld('github', {
   initiateOAuth: () => ipcRenderer.invoke('github-oauth'),
+  clone: (url: string, dir: string, onProgress?: (progress: { phase: string; loaded: number; total: number }) => void) => ipcRenderer.invoke('github-clone', url, dir, onProgress),
 });
+
+contextBridge.exposeInMainWorld('electronAPI', {
+  selectDirectory: () => ipcRenderer.invoke('select-directory'),
+}); 

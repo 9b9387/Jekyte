@@ -1,4 +1,5 @@
 import { GithubSignInButton } from './components/GithubSignInButton';
+import { GitCloneForm } from './components/GitCloneForm';
 
 function App() {
   return (
@@ -16,6 +17,7 @@ function App() {
           await new Promise(resolve => setTimeout(resolve, 1000));
         }} 
       />
+      <GitCloneForm />
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, protocol } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, protocol } from 'electron'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
@@ -30,7 +30,7 @@ let githubService: GitHubService | null = null;
 
 
 protocol.registerSchemesAsPrivileged([
-  {
+{
     scheme: 'jekyte',
     privileges: {
       secure: true,
@@ -66,6 +66,19 @@ function createWindow() {
     await githubService!.initiateOAuth();
   });
 
+  ipcMain.handle('github-clone', async (event, url: string, dir: string, onProgress?: (progress: { phase: string; loaded: number; total: number }) => void) => {
+    await githubService!.cloneRepository(url, dir, onProgress);
+  });
+  
+  // 添加 IPC 处理程序
+  ipcMain.handle('select-directory', async () => {
+    const result = await dialog.showOpenDialog({
+      properties: ['openDirectory', 'createDirectory'],
+      title: '选择克隆目标文件夹',
+    });
+    
+    return result.filePaths[0];
+  });
   win.webContents.openDevTools()
 }
 
@@ -100,9 +113,9 @@ app.on('open-url', async (event, url) => {
   }
 });
 
-// if (process.platform === 'darwin') {
-//   app.setAsDefaultProtocolClient('jekyte');
-// }
+if (process.platform === 'darwin') {
+  app.setAsDefaultProtocolClient('jekyte');
+}
 
 app.whenReady().then(async () => {
   createWindow();

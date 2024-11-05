@@ -26,5 +26,9 @@ interface Window {
   ipcRenderer: import('electron').IpcRenderer
   github: {
     initiateOAuth: () => Promise<void>;
-  };
+    clone: (url: string, dir: string, onProgress?: (progress: { phase: string; loaded: number; total: number }) => void) => Promise<void>;
+  }
+  electronAPI: {
+    selectDirectory: () => Promise<string>;
+  }
 }

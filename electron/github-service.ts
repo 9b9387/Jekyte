@@ -3,6 +3,9 @@ import path from 'path';
 import { BrowserWindow, shell } from 'electron';
 import axios, { AxiosInstance } from 'axios';
 import { TokenManager } from './token-manager';
+import git from 'isomorphic-git';
+import fs from 'fs-extra';
+import http from 'isomorphic-git/http/node';
 
 // 加载环境变量
 dotenv.config({
@@ -191,5 +194,87 @@ export class GitHubService {
   public async getCurrentUser() {
     const response = await this.githubApi.get('/user');
     return response.data;
+  }
+
+  /**
+   * 克隆仓库
+   * @param url 仓库地址
+   * @param dir 目标目录
+   * @param onProgress 进度回调
+   */
+  public async cloneRepository(
+    url: string, 
+    dir: string, 
+    onProgress?: (progress: { phase: string; loaded: number; total: number }) => void
+  ): Promise<void> {
+    try {
+      // 确保目标目录存在
+      await fs.ensureDir(dir);
+
+      // 设置认证信息
+      const auth = this.accessToken ? {
+        username: 'oauth2',
+        password: this.accessToken
+      } : undefined;
+
+      // 执行克隆
+      await git.clone({
+        fs,
+        http,
+        dir,
+        url,
+        depth: 1, // 可选：浅克隆
+        singleBranch: true, // 可选：只克隆单个分支
+        oauth2format: 'bearer',
+        onProgress,
+        ...auth ? { auth } : {},
+        headers: {
+          'User-Agent': 'jekyte-app'
+        }
+      });
+    } catch (error) {
+      this.handleError('Clone repository error', error);
+      throw new Error(
+        error instanceof Error 
+          ? `克隆仓库失败: ${error.message}` 
+          : '克隆仓库时发生未知错误'
+      );
+    }
+  }
+
+  /**
+   * 检查目录是否为空
+   * @param dir 目标目录
+   */
+  private async isDirectoryEmpty(dir: string): Promise<boolean> {
+    try {
+      const files = await fs.readdir(dir);
+      return files.length === 0;
+    } catch (error) {
+      if (error.code === 'ENOENT') {
+        return true; // 目录不存在视为空
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * 检查仓库 URL 是否有效
+   * @param url 仓库地址
+   */
+  public async validateRepositoryUrl(url: string): Promise<boolean> {
+    try {
+      // 从 URL 中提取所有者和仓库名
+      const match = url.match(/github\.com[/:]([\w-]+)\/([\w-]+)(?:\.git)?$/);
+      if (!match) return false;
+
+      const [, owner, repo] = match;
+      
+      // 检查仓库是否存在且可访问
+      const response = await this.githubApi.get(`/repos/${owner}/${repo}`);
+      return response.status === 200;
+    } catch {
+      return false;
+    }
   }
 } 
